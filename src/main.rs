@@ -1,19 +1,36 @@
 mod player;
 mod camera;
+mod keybinds;
+mod settings;
 
 use std::f32::consts::FRAC_PI_2;
 use player::*;
 use camera::*;
+use keybinds::*;
+use settings::*;
 
 const PLAYER_MOVEMENT_SPEED: f32 = 2.5;
 
 use bevy::{
-    color::palettes::tailwind, input::mouse::AccumulatedMouseMotion, pbr::NotShadowCaster, prelude::*, render::view::RenderLayers, window::CursorGrabMode
+    color::palettes::tailwind,
+    input::mouse::AccumulatedMouseMotion,
+    pbr::NotShadowCaster, prelude::*,
+    render::view::RenderLayers,
+    window::CursorGrabMode
 };
+
+use avian3d::prelude::*;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
+        // Resources
+        .init_resource::<KeyBindings>()
+        .init_resource::<Settings>()
+
+        // Plugins
+        .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+
+        // Systems
         .add_systems(
             Startup,
             (
@@ -241,24 +258,26 @@ fn change_fov(
 fn translate_player(
     time: Res<Time>,
     input: Res<ButtonInput<KeyCode>>,
-    query: Query<&mut Transform, With<Player>>
+    query: Query<&mut Transform, With<Player>>,
+    keybinds: Res<KeyBindings>,
+    settings: Res<Settings>,
 ) {
     for mut t in query {
-        let mut velocity = Vec3::ZERO;
+        let velocity = Vec3::ZERO;
         let local_z = t.local_z();
         let forward = -Vec3::new(local_z.x, 0.0, local_z.z);
         let right = Vec3::new(local_z.z, 0.0, -local_z.x);
-        if input.pressed(KeyCode::KeyW) {
-            t.translation += forward * PLAYER_MOVEMENT_SPEED * time.delta_secs();
+        if input.pressed(keybinds.forward) {
+            t.translation += forward * settings.movement_speed * time.delta_secs();
         }
-        if input.pressed(KeyCode::KeyS) {
-            t.translation += -forward * PLAYER_MOVEMENT_SPEED * time.delta_secs();
+        if input.pressed(keybinds.backward) {
+            t.translation += -forward * settings.movement_speed * time.delta_secs();
         }
-        if input.pressed(KeyCode::KeyD) {
-            t.translation += right * PLAYER_MOVEMENT_SPEED * time.delta_secs();
+        if input.pressed(keybinds.right) {
+            t.translation += right * settings.movement_speed * time.delta_secs();
         }
-        if input.pressed(KeyCode::KeyA) {
-            t.translation += -right * PLAYER_MOVEMENT_SPEED * time.delta_secs();
+        if input.pressed(keybinds.left) {
+            t.translation += -right * settings.movement_speed * time.delta_secs();
         }
     }
 }
