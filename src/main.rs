@@ -14,7 +14,7 @@ use bevy::{
     input::mouse::AccumulatedMouseMotion,
     pbr::NotShadowCaster, prelude::*,
     render::view::RenderLayers,
-    window::CursorGrabMode
+    window::CursorGrabMode,
 };
 
 use avian3d::prelude::*;
