@@ -90,6 +90,7 @@ fn spawn_view_model(
             CameraSensitivity::default(),
             Transform::from_xyz(0.0, 1.0, 0.0),
             Visibility::default(),
+            RigidBody,
         ))
         .with_children(|parent| {
             parent.spawn((
