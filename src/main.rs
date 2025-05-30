@@ -9,8 +9,6 @@ use camera::*;
 use keybinds::*;
 use settings::*;
 
-const PLAYER_MOVEMENT_SPEED: f32 = 2.5;
-
 use bevy::{
     color::palettes::tailwind,
     input::mouse::AccumulatedMouseMotion,
@@ -28,7 +26,11 @@ fn main() {
         .init_resource::<Settings>()
 
         // Plugins
-        .add_plugins((DefaultPlugins, PhysicsPlugins::default()))
+        .add_plugins((
+            DefaultPlugins,
+            PhysicsPlugins::default()
+                .set(PhysicsInterpolationPlugin::interpolate_all()),
+        ))
 
         // Systems
         .add_systems(
@@ -40,8 +42,9 @@ fn main() {
                 spawn_text,
             ),
         )
-        .add_systems(Update, (move_player, change_fov, translate_player).chain())
+        .add_systems(Update, (change_fov, translate_player).chain())
         .add_systems(Update, grab_mouse)
+        .add_systems(PostUpdate, move_player.before(TransformSystem::TransformPropagate))
         .run();
 }
 
@@ -90,7 +93,8 @@ fn spawn_view_model(
             CameraSensitivity::default(),
             Transform::from_xyz(0.0, 1.0, 0.0),
             Visibility::default(),
-            RigidBody,
+            RigidBody::Kinematic,
+            Collider::capsule(0.5, 2.0),
         ))
         .with_children(|parent| {
             parent.spawn((
@@ -143,18 +147,27 @@ fn spawn_world_model(
     // The world model camera will render the floor and the cubes spawned in this system.
     // Assigning no `RenderLayers` component defaults to layer 0.
    
-    commands.spawn((Mesh3d(floor), MeshMaterial3d(material.clone())));
+    commands.spawn((
+        Mesh3d(floor),
+        MeshMaterial3d(material.clone()),
+        RigidBody::Static,
+        Collider::cuboid(0.1, 10.0, 10.0),
+    ));
 
     commands.spawn((
         Mesh3d(cube.clone()),
         MeshMaterial3d(material.clone()),
         Transform::from_xyz(0.0, 0.25, -3.0),
+        RigidBody::Static,
+        Collider::cuboid(2.0, 0.5, 1.0),
     ));
 
     commands.spawn((
         Mesh3d(cube),
         MeshMaterial3d(material),
         Transform::from_xyz(1.75, 1.75, 0.0),
+        RigidBody::Dynamic,
+        Collider::cuboid(2.0, 0.5, 1.0),
     ));
 }
 
