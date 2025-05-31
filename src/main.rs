@@ -1,54 +1,19 @@
-mod player;
-mod camera;
-mod keybinds;
-mod settings;
+mod plugin;
 
-use std::f32::consts::FRAC_PI_2;
-use player::*;
-use camera::*;
-use keybinds::*;
-use settings::*;
-
+use avian3d::{math::*, prelude::*};
 use bevy::{
+    prelude::*,
     color::palettes::tailwind,
     input::mouse::AccumulatedMouseMotion,
-    pbr::NotShadowCaster, prelude::*,
+    pbr::NotShadowCaster,
     render::view::RenderLayers,
     window::CursorGrabMode,
 };
+use plugin::*;
 
-use avian3d::prelude::*;
+const VIEW_MODEL_RENDER_LAYER: usize = 1;
 
-fn main() {
-    App::new()
-        // Resources
-        .init_resource::<KeyBindings>()
-        .init_resource::<Settings>()
-
-        // Plugins
-        .add_plugins((
-            DefaultPlugins,
-            PhysicsPlugins::default()
-                .set(PhysicsInterpolationPlugin::interpolate_all()),
-        ))
-
-        // Systems
-        .add_systems(
-            Startup,
-            (
-                spawn_view_model,
-                spawn_world_model,
-                spawn_lights,
-                spawn_text,
-            ),
-        )
-        .add_systems(Update, (change_fov, translate_player).chain())
-        .add_systems(Update, grab_mouse)
-        .add_systems(PostUpdate, move_player.before(TransformSystem::TransformPropagate))
-        .run();
-}
-
-#[derive(Debug, Component)]
+#[derive(Component)]
 struct Player;
 
 #[derive(Debug, Component, Deref, DerefMut)]
@@ -70,133 +35,99 @@ impl Default for CameraSensitivity {
 #[derive(Debug, Component)]
 struct WorldModelCamera;
 
-/// Used implicitly by all entities without a `RenderLayers` component.
-/// Our world model camera and all objects other than the player are on this layer.
-/// The light source belongs to both layers.
-const DEFAULT_RENDER_LAYER: usize = 0;
-
-/// Used by the view model camera and the player's arm.
-/// The light source belongs to both layers.
-const VIEW_MODEL_RENDER_LAYER: usize = 1;
-
-fn spawn_view_model(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let arm = meshes.add(Cuboid::new(0.1, 0.1, 0.5));
-    let arm_material = materials.add(Color::from(tailwind::TEAL_200));
-
-    commands
-        .spawn((
-            Player,
-            CameraSensitivity::default(),
-            Transform::from_xyz(0.0, 1.0, 0.0),
-            Visibility::default(),
-            RigidBody::Kinematic,
-            Collider::capsule(0.5, 2.0),
+fn main() {
+    App::new()
+        .add_plugins((
+            DefaultPlugins,
+            PhysicsPlugins::default(),
+            CharacterControllerPlugin,
         ))
-        .with_children(|parent| {
-            parent.spawn((
-                WorldModelCamera,
-                Camera3d::default(),
-                Projection::from(PerspectiveProjection {
-                    fov: 90.0_f32.to_radians(),
-                    ..default()
-                }),
-            ));
-
-            // Spawn view model camera.
-            parent.spawn((
-                Camera3d::default(),
-                Camera {
-                    // Bump the order to render on top of the world model.
-                    order: 1,
-                    ..default()
-                },
-                Projection::from(PerspectiveProjection {
-                    fov: 70.0_f32.to_radians(),
-                    ..default()
-                }),
-                // Only render objects belonging to the view model.
-                RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
-            ));
-
-            // Spawn the player's right arm.
-            parent.spawn((
-                Mesh3d(arm),
-                MeshMaterial3d(arm_material),
-                Transform::from_xyz(0.2, -0.1, -0.25),
-                // Ensure the arm is only rendered by the view model camera.
-                RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
-                // The arm is free-floating, so shadows would look weird.
-                NotShadowCaster,
-            ));
-        });
+        .add_systems(Startup, setup)
+        .add_systems(Update, (move_player, grab_mouse))
+        .run();
 }
 
-fn spawn_world_model(
+fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    assets: Res<AssetServer>,
 ) {
-    let floor = meshes.add(Plane3d::new(Vec3::Y, Vec2::splat(10.0)));
-    let cube = meshes.add(Cuboid::new(2.0, 0.5, 1.0));
-    let material = materials.add(Color::WHITE);
-
-    // The world model camera will render the floor and the cubes spawned in this system.
-    // Assigning no `RenderLayers` component defaults to layer 0.
-   
+    // Player
     commands.spawn((
-        Mesh3d(floor),
-        MeshMaterial3d(material.clone()),
-        RigidBody::Static,
-        Collider::cuboid(0.1, 10.0, 10.0),
-    ));
+        Player,
+        CameraSensitivity::default(),
+        Mesh3d(meshes.add(Capsule3d::new(0.4, 1.0))),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        Transform::from_xyz(0.0, 1.5, 0.0),
+        CharacterControllerBundle::new(Collider::capsule(0.4, 1.0), Vector::NEG_Y * 9.81 * 2.0)
+            .with_movement(30.0, 0.92, 7.0, (30.0 as Scalar).to_radians()),
+    )).with_children(|parent| {
+        parent.spawn((
+            WorldModelCamera,
+            Camera3d::default(),
+            Projection::from(PerspectiveProjection {
+                fov: 90.0_f32.to_radians(),
+                ..default()
+            })
+        ));
 
-    commands.spawn((
-        Mesh3d(cube.clone()),
-        MeshMaterial3d(material.clone()),
-        Transform::from_xyz(0.0, 0.25, -3.0),
-        RigidBody::Static,
-        Collider::cuboid(2.0, 0.5, 1.0),
-    ));
+        // Spawn view model camera 
+        parent.spawn((
+            Camera3d::default(),
+            Camera {
+                order: 1,
+                ..default()
+            },
+            Projection::from(PerspectiveProjection {
+                fov: 70.0_f32.to_radians(),
+                ..default()
+            }),
+            RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
+        ));
 
+        // Right arm
+        parent.spawn((
+                Mesh3d(assets.load("sword1.glb#Scene0")),
+                Transform::from_xyz(0.5, -0.1, -0.25),
+                RenderLayers::layer(VIEW_MODEL_RENDER_LAYER),
+                NotShadowCaster,
+        ));
+    });
+
+    // A cube to move aroud
     commands.spawn((
-        Mesh3d(cube),
-        MeshMaterial3d(material),
-        Transform::from_xyz(1.75, 1.75, 0.0),
         RigidBody::Dynamic,
-        Collider::cuboid(2.0, 0.5, 1.0),
+        Collider::cuboid(1.0, 1.0, 1.0),
+        Mesh3d(meshes.add(Cuboid::default())),
+        MeshMaterial3d(materials.add(Color::srgb(0.8, 0.7, 0.6))),
+        Transform::from_xyz(3.0, 2.0, 3.0),
     ));
-}
 
-fn spawn_lights(mut commands: Commands) {
+    // Environment (see the `collider_constructors` example for creating colliders from scenes)
+    commands.spawn((
+        SceneRoot(assets.load("level-1.glb#Scene0")),
+        Transform::from_rotation(Quat::from_rotation_y(-core::f32::consts::PI * 0.5)),
+        ColliderConstructorHierarchy::new(ColliderConstructor::ConvexHullFromMesh),
+        RigidBody::Static,
+    ));
+
+    // Light
     commands.spawn((
         PointLight {
-            color: Color::from(tailwind::ROSE_300),
+            intensity: 2_000_000.0,
+            range: 50.0,
             shadows_enabled: true,
             ..default()
         },
-        Transform::from_xyz(-2.0, 4.0, -0.75),
-        // The light source illuminates both the world model and the view model.
-        RenderLayers::from_layers(&[DEFAULT_RENDER_LAYER, VIEW_MODEL_RENDER_LAYER]),
+        Transform::from_xyz(0.0, 15.0, 0.0),
     ));
-}
 
-fn spawn_text(mut commands: Commands) {
-    commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(12.0),
-            left: Val::Px(12.0),
-            ..default()
-        })
-        .with_child(Text::new(concat!(
-            "Move the camera with your mouse.\n",
-            "Press arrow up to decrease the FOV of the world model.\n",
-            "Press arrow down to increase the FOV of the world model."
-        )));
+    // Camera
+    commands.spawn((
+        Camera3d::default(),
+        Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    ));
 }
 
 fn grab_mouse(
@@ -213,7 +144,13 @@ fn grab_mouse(
         window.cursor_options.visible = true;
         window.cursor_options.grab_mode = CursorGrabMode::None;
     }
+    // // Camera
+    // commands.spawn((
+    //     Camera3d::default(),
+    //     Transform::from_xyz(-7.0, 9.5, 15.0).looking_at(Vec3::ZERO, Vec3::Y),
+    // ));
 }
+
 
 fn move_player(
     accumulated_mouse_motion: Res<AccumulatedMouseMotion>,
@@ -225,10 +162,11 @@ fn move_player(
 
     if delta != Vec2::ZERO {
         // Note that we are not multiplying by delta_time here.
-        // The reason is that for mouse movement, we already get the full movement that happened since the last frame.
-        // This means that if we multiply by delta_time, we will get a smaller rotation than intended by the user.
+        // The reason is that for mouse movement, we already get the full movement that happened sice the last frame.
+        // This means that if we multiply by delta_time, we will get a smaller rotation than
+        // intended by the user.
         // This situation is reversed when reading e.g. analog input from a gamepad however, where the same rules
-        // as for keyboard input apply. Such an input should be multiplied by delta_time to get the intended rotation
+        // as for keyboard input apply. Such an input should be multiplied by delta_time to get theintended rotation
         // independent of the framerate.
         let delta_yaw = -delta.x * camera_sensitivity.x;
         let delta_pitch = -delta.y * camera_sensitivity.y;
@@ -236,6 +174,9 @@ fn move_player(
         let (yaw, pitch, roll) = transform.rotation.to_euler(EulerRot::YXZ);
         let yaw = yaw + delta_yaw;
 
+        // If the pitch was ±¹⁄₂ π, the camera would look straight up or down.
+        // When the user wants to move the camera back to the horizon, which way should the camera face?
+        // The camera has no way of knowing what direction was "forward" before landing in that ext
         // If the pitch was ±¹⁄₂ π, the camera would look straight up or down.
         // When the user wants to move the camera back to the horizon, which way should the camera face?
         // The camera has no way of knowing what direction was "forward" before landing in that extreme position,
@@ -246,53 +187,6 @@ fn move_player(
         let pitch = (pitch + delta_pitch).clamp(-PITCH_LIMIT, PITCH_LIMIT);
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, roll);
-    }
-}
-
-fn change_fov(
-    input: Res<ButtonInput<KeyCode>>,
-    mut world_model_projection: Single<&mut Projection, With<WorldModelCamera>>,
-) {
-    let Projection::Perspective(perspective) = world_model_projection.as_mut() else {
-        unreachable!(
-            "The `Projection` component was explicitly built with `Projection::Perspective`"
-        );
-    };
-
-    if input.pressed(KeyCode::ArrowUp) {
-        perspective.fov -= 1.0_f32.to_radians();
-        perspective.fov = perspective.fov.max(20.0_f32.to_radians());
-    }
-    if input.pressed(KeyCode::ArrowDown) {
-        perspective.fov += 1.0_f32.to_radians();
-        perspective.fov = perspective.fov.min(160.0_f32.to_radians());
-    }
-}
-
-fn translate_player(
-    time: Res<Time>,
-    input: Res<ButtonInput<KeyCode>>,
-    query: Query<&mut Transform, With<Player>>,
-    keybinds: Res<KeyBindings>,
-    settings: Res<Settings>,
-) {
-    for mut t in query {
-        let velocity = Vec3::ZERO;
-        let local_z = t.local_z();
-        let forward = -Vec3::new(local_z.x, 0.0, local_z.z);
-        let right = Vec3::new(local_z.z, 0.0, -local_z.x);
-        if input.pressed(keybinds.forward) {
-            t.translation += forward * settings.movement_speed * time.delta_secs();
-        }
-        if input.pressed(keybinds.backward) {
-            t.translation += -forward * settings.movement_speed * time.delta_secs();
-        }
-        if input.pressed(keybinds.right) {
-            t.translation += right * settings.movement_speed * time.delta_secs();
-        }
-        if input.pressed(keybinds.left) {
-            t.translation += -right * settings.movement_speed * time.delta_secs();
-        }
     }
 }
 
